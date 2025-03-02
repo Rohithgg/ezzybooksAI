@@ -1,11 +1,32 @@
-import docx
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
-import pdfplumber
-# import docx
-import ollama
 import os
-from ollama import ChatResponse
-from ollama import chat
+from http.client import responses
+from fastapi import FastAPI, UploadFile, HTTPException
+import pdfplumber
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import START, MessagesState, StateGraph
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_ollama.llms import OllamaLLM
+import getpass
+import os
+from langchain_core.messages import AIMessage, HumanMessage
+
+# import the model from langchain
+model = OllamaLLM(model="llama3.1")
+# define the model
+workflow = StateGraph(state_schema=MessagesState)
+# define the model
+def call_model(state: MessagesState):
+    response = model.invoke(state["messages"])
+    return {"messages": response}
+# define the single state node in the graph
+workflow.add_edge(START, "model")
+workflow.add_node("model", call_model)
+# save the memory
+memory_saver = MemorySaver()
+aiapp = workflow.compile(checkpointer=memory_saver)
+#config
+config = {"configurable": {"thread_id": "abc123"}}
+
 app = FastAPI()
 
 def extract_pdf_book(pdf_file):
@@ -15,37 +36,49 @@ def extract_pdf_book(pdf_file):
             text += page.extract_text()
     return text.strip()
 
-def extract_docx_book(docx_file):
-    doc = docx.opendocx(docx_file)
-    text = ""
-    for paragraph in doc.paragraphs:
-        text += paragraph.text
-    return text.strip()
+@app.post("/summarize/")
+# summerize the text using the model and context
+def summary(text):
+    query = "summarize this in a manageable chunks and help the user understand better and fast: {}".format(text)
+    input_messages = [HumanMessage(query)]
+    output = aiapp.invoke({"messages": input_messages}, config)
+    output["messages"][-1].pretty_print()
 
-@app.post("/summarize")
-def summarize(file: UploadFile(...)):
-    try:
-        if file.content_type == "application/pdf" and file.filename.endswith(".pdf"):
-            return extract_pdf_book(file.file)
-        elif file.content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" and file.endswith(".docx"):
-            return extract_docx_book(file.file)
-        else:
-            raise HTTPException(status_code=400, detail="Unsupported file type")
+def chat():
+    while True:
+        user_input = input("User: ")
+        if user_input.lower() == "/exit":
+            break
+        input_messages = [HumanMessage(user_input)]
+        output = aiapp.invoke({"messages": input_messages}, config)
+        output["messages"][-1].pretty_print()
 
-    #response
-        response: ChatResponse = chat(model="qwen2",
-                                  context="for the given pdf or docx you have to summarise and convey it to the user in simple and manageable chucks",
-                                  messages=[
-                                      {
-                                
-                                          "role": "user",
-                                          "content": input("You: ")
-                                      }
-                                  ])
-        summery = (response["messages"]["content"])
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    print(summery)
+@app.post("/upload/")
+def main():
+    # pages for the pdf and chatbot
+    print("Welcome to the PDF Summarizer!")
+    print("Please upload a PDF or DOCX file to summarize it.")
+    print("You can also chat with the chatbot to get a summary.")
+    print("You can type 'exit' to exit the chatbot.")
+    print("")
+    print("Please enter the path to the file you want to summarize:")
+    file_path = input("File Path: ")
+    if not os.path.exists(file_path):
+        print("File not found.")
+        return
+    if file_path.endswith(".pdf"):
+        text = extract_pdf_book(file_path)
+    else:
+        print("Unsupported file type.")
+        return
+    print("Summarizing the file...")
+    print("Chatbot:")
+    summary(text)
+    print("continue chatting with the chatbot")
+    chat()
+
+
+
+
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=11434)
+    main()
