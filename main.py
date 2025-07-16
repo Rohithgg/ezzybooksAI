@@ -36,7 +36,7 @@ def extract_pdf_book(pdf_file):
             text += page.extract_text()
     return text.strip()
 
-@app.post("/summarize/")
+@app.post("/summarize/") #TODO: pipline this into the front end
 # summerize the text using the model and context
 def summary(text):
     query = "summarize this in a manageable chunks and help the user understand better and fast: {}".format(text)
@@ -54,7 +54,7 @@ def chat():
         output["messages"][-1].pretty_print()
 
 @app.post("/upload/")
-def main():
+def main():#this is just a console not a UI TODO: make UI and pipeline it 
     # pages for the pdf and chatbot
     print("Welcome to the PDF Summarizer!")
     print("Please upload a PDF or DOCX file to summarize it.")
